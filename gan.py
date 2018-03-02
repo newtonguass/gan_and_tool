@@ -150,7 +150,7 @@ class ganpy:
                 if conv_loop>1:
                     image = image + by_pass
           
-            image = tf.reduce_mean(image, reduction_indices=[1, 2], name='avg_pool')
+            #image = tf.reduce_mean(image, reduction_indices=[1, 2], name='avg_pool')
             print(image)
             
             return image
@@ -162,14 +162,14 @@ class ganpy:
         with tf.variable_scope(name):
             
             print(image)
-            image = self.linear_project(image, decoder_size[0], name='linear_project')
+            #image = self.linear_project(image, decoder_size[0], name='linear_project')
             for i in range(1, len(decoder_size)):
             
                 image = tf.image.resize_images(image, 
                                                decoder_size[i][0:2],
                                                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
                 if i==len(decoder_size)-1 :
-                        function_type = "same"
+                        function_type = "tanh"
                         bn=False
                 for j in range(conv_loop):
                     

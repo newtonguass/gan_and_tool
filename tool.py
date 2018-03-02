@@ -9,19 +9,17 @@ cnn_face_detector = dlib.cnn_face_detection_model_v1(pretrained)
 
 
 
-def display(image_, size, epoch=None):
+def display(image_, size, epoch=None, scale=None):
     if image_.shape[-1] == 3:
-        display_color(image_, size, epoch=epoch)
+        display_color(image_, size, epoch=epoch, scale=scale)
     else:
-        display_gray(image_, size, epoch=epoch)
+        display_gray(image_, size, epoch=epoch, scale=scale)
     
-def display_color(image_, size, epoch=None):
+def display_color(image_, size, epoch=None, scale=None):
     image = np.copy(image_).astype(np.float32)
-    for i in range(image.shape[0]):
-        image[i] = image[i] -image[i] .min()
-        image[i] = image[i] * 255/image[i] .max() 
-   
-    image = image.round()
+    if scale:
+        image = (image+1)*255/2
+        image = image.round()
     image_width = image.shape[1]
     interval = 2
     canvas = np.zeros((((image_width+interval)*size)+interval,((image_width+interval)*size)+interval, 3))
@@ -36,12 +34,11 @@ def display_color(image_, size, epoch=None):
         plt.title(str(epoch))
     plt.show()
     
-def display_gray(image_, size, epoch=None):
+def display_gray(image_, size, epoch=None, scale=None):
     image = np.copy(image_).astype(np.float32)
-    for i in range(image.shape[0]):
-        image[i] = image[i] -image[i] .min()
-        image[i] = image[i] * 255/image[i] .max() 
-    image = image.round()
+    if scale:
+        image = (image+1)*255/2
+        image = image.round()
     image_width = image.shape[1]
     interval = 2
     canvas = np.zeros((((image_width+interval)*size)+interval,((image_width+interval)*size)+interval))
