@@ -1,6 +1,6 @@
 # gan_and_tool
 <pre>
-This gan project using a autoencoder structure,<br>
+This gan project using a autoencoder structure,
 each layer of encoder and decoder contain a residual block,
 you can choose how much residual loop you want to repeat.
 The structure of discriminator is smiliar to encoder, 
