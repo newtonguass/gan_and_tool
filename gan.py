@@ -56,17 +56,23 @@ class ganpy:
     def linear_project(self, image, output_size, bn=False, 
                        function_type="elu",name='linear_project'):
         temp = image.get_shape().as_list()
+        if len(temp)-1 == len(output_size):
+            reshape = False
+        else:
+            reshape = True
+
         length = 1
         for i in range(1,len(temp)):
             length *= temp[i]
-        image = tf.reshape(image, [-1, length])
+        if reshape:
+            image = tf.reshape(image, [-1, length])
         input_len = image.get_shape().as_list()[1]
         output_flatten_length = 1
         for i in output_size:
             output_flatten_length *= i
         with tf.variable_scope(name):
             initializer = tf.random_normal_initializer(dtype=tf.float32, 
-                                                       stddev=1/input_len)
+                                                       stddev=2/input_len)
             weight = tf.get_variable(name='weight', 
                                      dtype=tf.float32, 
                                      shape=[input_len, 
@@ -84,16 +90,17 @@ class ganpy:
             image = self.activation_function(image,
                                              function_type=function_type,
                                              name="avtivation_function")
-            image = tf.reshape(image, [-1]+output_size)
+            if reshape:
+                image = tf.reshape(image, [-1]+output_size)
             return image
 
     def conv2d(self, image, output_dim, kernel_size=3, strides=2, 
-               bn=True, function_type="elu" ,name="con2d"):
+               bn=False, function_type="elu" ,name="con2d"):
         strides = [1, strides, strides, 1]
         with tf.variable_scope(name):
             input_channel = image.get_shape().as_list()[-1]
             initializer = tf.random_normal_initializer(dtype=tf.float32,
-                                                        stddev=1/((kernel_size**2)*input_channel))
+                                                        stddev=2/((kernel_size**2)*input_channel))
             kernel = tf.get_variable(name='kernel',
                                      dtype=tf.float32, 
                                      shape =[kernel_size,
@@ -121,105 +128,220 @@ class ganpy:
                                              name="avtivation_function")
             return image
     
-    def encoder(self, image, encoder_size , function_type="elu",
-                kernel_size=3 ,bn=False, conv_loop=1 ,name='encoder', drop=None):
+    def residual_block(self, image, output_channel, function_type="elu",
+                kernel_size=3 ,bn=False, down_sample=False, conv_bypass=False,residual_=2,
+                name='residual_block'):
+        if down_sample:
+            stride_=2
+        else:
+            
+            stride_=1
+        if conv_bypass:
+            by_pass = self.conv2d(image, 
+                               output_channel,
+                               kernel_size=kernel_size, 
+                               strides=stride_, 
+                               bn=bn, 
+                               function_type = 'same',
+                               name=name+"_by_pass")
+        else:
+            by_pass = tf.identity(image, name=name+'_by_pass')
+        print(by_pass)
         
-        
+        for i in range(residual_ ):
+            if i>0:
+                stride_=1
+            if i<residual_-1:
+                output_channel_ = output_channel//2
+                non_linear = function_type
+            else:
+                output_channel_ = output_channel
+                non_linear = 'same'
+             
+            image = self.conv2d(image, 
+                               output_channel_,
+                               kernel_size=3, 
+                               strides=stride_, 
+                               bn=bn, 
+                               function_type = non_linear,
+                               name=name+"_residual_"+str(i))
+            print(image)
+        image = image + by_pass
+        image = self.activation_function(image, function_type=function_type)
+        print(image)
+        return image
+
+    def residual_mlp(self, image, size, function_type='elu', bn=False , mlp_bypass=True, residual_=2, name='resudual_mlp'):
+        if mlp_bypass:
+            bypass = self.linear_project(image, 
+                                        size, 
+                                        bn=False,
+                                        function_type = 'same',
+                                        name=name+'_bypass')
+        else:
+            bypass = tf.identity(image, name=name+'_bypass')
+        print(bypass)
+        for i in range(residual_):
+            if i<residual_-1:
+                non_linear = function_type
+                hidden = [size[0]//2]
+            else:
+                non_linear = 'same'
+                hidden = size
+            image = self.linear_project(image, 
+                                        hidden, 
+                                        bn=bn,
+                                        function_type = non_linear,
+                                        name=name+'_residual_'+str(i))
+            print(image)
+        image = bypass + image
+        image = self.activation_function(image, function_type=function_type)
+        return image
+
+    def mlp(self, image, mlp_size, function_type="elu", bn=False, residual_block=2, residual_=2, name="mlp"):
+        with tf.variable_scope(name):
+            for i in range(len(mlp_size)):
+                if i==len(mlp_size)-1:
+                    bn = False
+                for j in range(residual_block):
+                    if j>0:
+                        mlp_bypass=False
+                    else:
+                        mlp_bypass=True
+                    image = self.residual_mlp(image,
+                                mlp_size[i], 
+                                function_type=function_type,
+                                bn=bn,
+                                mlp_bypass=mlp_bypass, 
+                                residual_ = residual_,
+                                name='resudual_mlp_'+str(i)+'_'+str(j))
+           
+            return image
+
+    def mlp_d(self, image, mlp_size, function_type="elu", bn=False, residual_block=2, residual_=2, name="mlp"):
+        with tf.variable_scope(name):
+            for i in range(len(mlp_size)):
+                for j in range(residual_block):
+                    if j>0:
+                        mlp_bypass=False
+                    else:
+                        mlp_bypass=True
+                    image = self.residual_mlp(image,
+                                mlp_size[i], 
+                                function_type=function_type,
+                                bn=bn,
+                                mlp_bypass=mlp_bypass, 
+                                residual_ = residual_,
+                                name='resudual_mlp_'+str(i)+'_'+str(j))
+            return image
+
+    def bottleneck(self, image, encoder_size , function_type="elu",
+                kernel_size=3,bn=False, residual_block=2,residual_=2 ,name='encoder'):
         with tf.variable_scope(name):    
             for i in range(len(encoder_size)):
-                
-                image = self.conv2d(image, 
-                                   encoder_size[i][-1],
-                                   kernel_size=kernel_size, 
-                                   strides=2, 
-                                   bn=bn, 
-                                   function_type = function_type,
-                                   name=name+"_layer_"+str(i)+"_0")
-                if conv_loop>1:
-                    by_pass =  tf.identity(image, name="by_pass"+str(i))
-                print(image)
-                for j in range(conv_loop-1):                        
-                    image = self.conv2d(image, 
-                                       encoder_size[i][-1],
-                                       kernel_size=kernel_size, 
-                                       strides=1, 
-                                       bn=bn, 
-                                       function_type = function_type,
-                                       name=name+"_layer_"+str(i)+"_"+str(j+1))
-                    print(image)
-                if conv_loop>1:
-                    image = image + by_pass
-          
-            #image = tf.reduce_mean(image, reduction_indices=[1, 2], name='avg_pool')
-            print(image)
-            
+
+                for j in range(residual_block):    
+                    if j>0:
+                        conv_bypass = False
+                    else:
+                        conv_bypass = True
+                    image = self.residual_block(image,
+                                    encoder_size[i][-1], 
+                                    function_type=function_type,
+                                    kernel_size=kernel_size ,
+                                    bn=bn, 
+                                    down_sample=False, 
+                                    conv_bypass=conv_bypass,
+                                    residual_ = residual_,
+                                    name='residual_block_layer'+str(i)+'_'+str(j))
+            return image
+    def encoder(self, image, encoder_size , function_type="elu",
+                kernel_size=3,bn=False, residual_block=2,residual_=2 ,name='encoder'):
+        with tf.variable_scope(name):    
+            for i in range(len(encoder_size)):
+
+                for j in range(residual_block):    
+                    if j>0:
+                        down_sample=False
+                        conv_bypass = False
+                    else:
+                        down_sample=True
+                        conv_bypass = True
+                    image = self.residual_block(image,
+                                    encoder_size[i][-1], 
+                                    function_type=function_type,
+                                    kernel_size=kernel_size ,
+                                    bn=bn, 
+                                    down_sample=down_sample, 
+                                    conv_bypass=conv_bypass,
+                                    residual_ = residual_,
+                                    name='residual_block_layer'+str(i)+'_'+str(j))
+
+
             return image
         
+
     def decoder(self, image, decoder_size, function_type="elu",
-                kernel_size=3, bn=False, conv_loop=1,name='decoder', drop=None):
-       
-    
+                kernel_size=3, bn=False, residual_block=2, residual_=2,loss_layer=None, name='decoder'):
         with tf.variable_scope(name):
-            
+            outputs = [] 
             print(image)
-            #image = self.linear_project(image, decoder_size[0], name='linear_project')
-            for i in range(1, len(decoder_size)):
+
+            for i in range(len(decoder_size)):
             
                 image = tf.image.resize_images(image, 
                                                decoder_size[i][0:2],
                                                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-                if i==len(decoder_size)-1 :
-                        function_type = "tanh"
-                        bn=False
-                for j in range(conv_loop):
-                    
-                    image = self.conv2d(image, 
-                                        decoder_size[i][-1],
+                for j in range(residual_block):
+                    if j>0:
+                        conv_bypass = False
+                    else:
+                        conv_bypass = True
+                    image = self.residual_block(image,
+                                    decoder_size[i][-1], 
+                                    function_type=function_type,
+                                    kernel_size=3 ,
+                                    bn=bn, 
+                                    down_sample=False,
+                                    conv_bypass=conv_bypass,
+                                    residual_ = residual_,
+                                    name='residual_block_layer'+str(i)+'_'+str(j))
+                if decoder_size[i][0]>=decoder_size[-loss_layer][0]:            
+                    output = self.conv2d(image, 
+                                        1,
                                         kernel_size=kernel_size, 
                                         strides=1, 
-                                        bn=bn, 
-                                        function_type = function_type,
-                                        name=name+"_layer_"+str(i)+"_"+str(j))
-                    print(image)
-                    if conv_loop>1 and j==0:
-                        by_pass =  tf.identity(image, name="by_pass"+str(i))
-                if conv_loop>1 :
-                    image = image + by_pass
-            
+                                        function_type = 'tanh',
+                                        name=name+"_output_"+str(i))
+                    outputs.append(output)
+
             print(image)
-            
-            
-            return image 
-    
+            if loss_layer!=None:
+                return outputs
+            else:
+                return image
+            return image
+
     def discriminator(self, image, encoder_size , function_type="elu",
-                kernel_size=3, strides=2,bn=True, conv_loop=1 ,name='discriminator', drop=None):
+                kernel_size=3, strides=2,bn=True,name='discriminator'):
         
         with tf.variable_scope(name):    
-            for i in range(len(encoder_size)-1):
-                if drop!=None:                
-                    image = tf.nn.dropout(image, keep_prob=drop)
-                image = self.conv2d(image, 
-                                   encoder_size[i][-1],
-                                   kernel_size=kernel_size, 
-                                   strides=2, 
-                                   bn=bn, 
-                                   function_type = function_type,
-                                   name=name+"_layer_"+str(i)+"_0")
-                if conv_loop>1:
-                    by_pass =  tf.identity(image, name="by_pass"+str(i))
-                print(image)
-                for j in range(conv_loop-1):                        
-                    image = self.conv2d(image, 
-                                       encoder_size[i][-1],
-                                       kernel_size=kernel_size, 
-                                       strides=1, 
-                                       bn=bn, 
-                                       function_type = function_type,
-                                       name=name+"_layer_"+str(i)+"_"+str(j+1))
-                    print(image)
-                if conv_loop>1:
-                    image = image + by_pass
-          
+            for i in range(len(encoder_size)):
+                for j in range(2):    
+                    if j>0:
+                        down_sample=False
+                        conv_bypass = False
+                    else:
+                        down_sample=True
+                        conv_bypass = True
+                    image = self.residual_block(image,
+                                    encoder_size[i][-1], 
+                                    function_type="elu",
+                                    kernel_size=3 ,
+                                    bn=bn, 
+                                    down_sample=down_sample, 
+                                    conv_bypass=conv_bypass,
+                                    name='residual_block_layer'+str(i)+'_'+str(j))
             image = tf.reduce_mean(image, reduction_indices=[1, 2], name='avg_pool')
             print(image)
             image = self.linear_project(image, 
